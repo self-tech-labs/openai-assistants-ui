@@ -66,7 +66,7 @@ def ask_openai():
         if user_input.lower() == "send transcript to my email":
             if transcript:
                 email_body = "\n".join(transcript)
-                send_email("Your Conversation Transcript", "recipient@example.com", email_body)
+                send_email("Your Conversation Transcript", "ervaucher@gmail.com", email_body)
                 transcript.clear()  # Clear the transcript after sending
                 return jsonify("Transcript sent to your email.")
             else:

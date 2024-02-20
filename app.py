@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, jsonify
+from flask_mail import Mail, Message
 import openai, time, paramiko, json
 import os
 from dotenv import load_dotenv
@@ -9,8 +10,25 @@ load_dotenv()
 # Initialize Flask app
 app = Flask(__name__)
 
+# Flask-Mail configuration
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'  # Your SMTP server
+app.config['MAIL_PORT'] = 587  # Your SMTP port (commonly 587 for TLS)
+app.config['MAIL_USE_TLS'] = True  # Use TLS
+app.config['MAIL_USERNAME'] = os.getenv('EMAIL_USER')  # Your email username
+app.config['MAIL_PASSWORD'] = os.getenv('EMAIL_PASS')  # Your email password
+app.config['MAIL_DEFAULT_SENDER'] = os.getenv('EMAIL_USER')  # Default sender email address
+
+# Initialize Flask-Mail
+mail = Mail(app)
+
 # Set OpenAI API key
 openai.api_key = os.getenv("OPENAI_API_KEY")
+
+def send_email(subject, recipient, body):
+    msg = Message(subject, recipients=[recipient], body=body)
+    mail.send(msg)
+
+transcript = []  # Initialize an empty list to hold the discussion transcript
 
 # Route to serve the index page
 @app.route('/')
@@ -30,34 +48,48 @@ def create_thread():
 # Route to handle POST requests
 @app.route('/ask', methods=['POST'])
 def ask_openai():
+    global transcript  # Ensure you have declared transcript at a global level
     data = request.json
     thread_id = data.get('thread_id')
     user_input = data.get('input')
     user_files = data.get('file_ids')
+
     # Ensure user input is provided
     if not user_input and not user_files:
         return jsonify("No input provided"), 400
     if thread_id == 'None':
         return jsonify("No thread provided"), 400
     try:
+        # Append user input to transcript
+        transcript.append(f"User: {user_input}")
+
+        if user_input.lower() == "send transcript to my email":
+            if transcript:
+                email_body = "\n".join(transcript)
+                send_email("Your Conversation Transcript", "recipient@example.com", email_body)
+                transcript.clear()  # Clear the transcript after sending
+                return jsonify("Transcript sent to your email.")
+            else:
+                return jsonify("No transcript available to send.")
+
         # Create message on thread
         thread_message = openai.beta.threads.messages.create(
-        thread_id,
-        role="user",
-        content=user_input,
-        file_ids=user_files
+            thread_id,
+            role="user",
+            content=user_input,
+            file_ids=user_files
         )
         # Run assistant on thread
         run = openai.beta.threads.runs.create(
-        thread_id=thread_id,
-        assistant_id=os.environ.get('OPENAI_ASSISTANT_ID')
+            thread_id=thread_id,
+            assistant_id=os.environ.get('OPENAI_ASSISTANT_ID')
         )
-        while run.status != 'completed': # TODO add check for failure and other statuses
+        while run.status != 'completed':  # TODO add check for failure and other statuses
             # Check run status
             print('Run Status: ' + run.status)
             run = openai.beta.threads.runs.retrieve(
-            thread_id=thread_id,
-            run_id=run.id
+                thread_id=thread_id,
+                run_id=run.id
             )
             # If a function is required, run it and submit the output
             if run.status == 'requires_action':
@@ -66,29 +98,24 @@ def ask_openai():
                 function_list = []
                 for action in run.required_action.submit_tool_outputs.tool_calls:
                     match action.function.name:
-                        case 'run_command': # Match for run_command function
-                            args = json.loads(action.function.arguments) # Load arguments passed from the assistant
+                        case 'run_command':  # Match for run_command function
+                            args = json.loads(action.function.arguments)  # Load arguments passed from the assistant
                             function_return = {"tool_call_id": action.id, "output": run_command(args['hostname'], args['command'])}
                             function_list.append(function_return)
-                        case 'print_working_dir_files': 
-                            args = json.loads(action.function.arguments) # Load arguments passed from the assistant
-                            # if args['path'] exists, use it, otherwise use empty string
+                        case 'print_working_dir_files':
+                            args = json.loads(action.function.arguments)  # Load arguments passed from the assistant
                             if 'path' in args:
                                 function_return = {"tool_call_id": action.id, "output": print_working_dir_files(args['path'])}
-                                print(function_return)
                             else:
                                 function_return = {"tool_call_id": action.id, "output": print_working_dir_files()}
-                                print(function_return)
                             function_list.append(function_return)
                         case 'read_file':
-                            args = json.loads(action.function.arguments) # Load arguments passed from the assistant
+                            args = json.loads(action.function.arguments)  # Load arguments passed from the assistant
                             function_return = {"tool_call_id": action.id, "output": read_file(args['path'])}
-                            print(function_return)
                             function_list.append(function_return)
                         case 'write_file':
-                            args = json.loads(action.function.arguments) # Load arguments passed from the assistant
+                            args = json.loads(action.function.arguments)  # Load arguments passed from the assistant
                             function_return = {"tool_call_id": action.id, "output": write_file(args['path'], args['contents'])}
-                            print(function_return)
                             function_list.append(function_return)
                         case _:
                             function_return = 'Function does not exist'
@@ -97,17 +124,24 @@ def ask_openai():
                     thread_id=thread_id,
                     run_id=run.id,
                     tool_outputs=function_list
-                    )
-            time.sleep(.2) # Sleep and check run status again
+                )
+            time.sleep(.2)  # Sleep and check run status again
         print('Run Status: ' + run.status)
 
         msgs = openai.beta.threads.messages.list(thread_id)
-        #msgs.data[0].content[0].text.value
+        # Assuming you are appending the assistant's response to the transcript here
+        transcript.append(f"Assistant: {msgs.data[0].content[0].text.value}")
+
+        # Here you would check if the condition to send the email is met
+        # if should_send_email:
+        #     send_email("Discussion Transcript", "your_email@example.com", "\n".join(transcript))
+        #     transcript.clear()  # Optionally clear the transcript after sending
 
         return jsonify(msgs.data[0].content[0].text.value)
     except Exception as e:
         print(str(e))
         return jsonify(str(e)), 500
+
 
 # Route to fetch thread messages
 @app.route('/get_thread_messages', methods=['POST'])

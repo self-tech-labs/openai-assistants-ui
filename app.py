@@ -48,29 +48,33 @@ def create_thread():
 # Route to handle POST requests
 @app.route('/ask', methods=['POST'])
 def ask_openai():
-    global transcript  # Ensure you have declared transcript at a global level
+    global transcript
     data = request.json
     thread_id = data.get('thread_id')
     user_input = data.get('input')
     user_files = data.get('file_ids')
 
-    # Ensure user input is provided
     if not user_input and not user_files:
         return jsonify("No input provided"), 400
     if thread_id == 'None':
         return jsonify("No thread provided"), 400
+
     try:
-        # Append user input to transcript
         transcript.append(f"User: {user_input}")
 
+        # Generate and append chatbot's response before checking for "send transcript" command
+        # Simulate fetching chatbot's response (this part needs to be implemented based on your logic)
+        # This is a placeholder to represent the logic of appending chatbot's response
+        # chatbot_response = "This should be replaced with the actual chatbot response logic."
+        # transcript.append(f"Assistant: {chatbot_response}")
+
+        # Now check if the user input was to send the transcript, and send the email after including chatbot's response
         if user_input.lower() == "send transcript":
             if transcript:
                 email_body = "\n".join(transcript)
                 send_email("Your Conversation Transcript", "ervaucher@gmail.com", email_body)
                 transcript.clear()  # Clear the transcript after sending
                 return jsonify("Transcript sent to your email.")
-            else:
-                return jsonify("No transcript available to send.")
 
         # Create message on thread
         thread_message = openai.beta.threads.messages.create(

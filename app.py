@@ -63,7 +63,7 @@ def ask_openai():
         # Append user input to transcript
         transcript.append(f"User: {user_input}")
 
-        if user_input.lower() == "send transcript to my email":
+        if user_input.lower() == "send transcript":
             if transcript:
                 email_body = "\n".join(transcript)
                 send_email("Your Conversation Transcript", "ervaucher@gmail.com", email_body)

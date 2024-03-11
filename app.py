@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, jsonify
 from flask_mail import Mail, Message
-import openai, time, paramiko, json
-import os
+from flask_sqlalchemy import SQLAlchemy
+import openai, time, paramiko, json, os
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -11,24 +11,44 @@ load_dotenv()
 app = Flask(__name__)
 
 # Flask-Mail configuration
-app.config['MAIL_SERVER'] = 'smtp.gmail.com'  # Your SMTP server
-app.config['MAIL_PORT'] = 587  # Your SMTP port (commonly 587 for TLS)
-app.config['MAIL_USE_TLS'] = True  # Use TLS
-app.config['MAIL_USERNAME'] = os.getenv('EMAIL_USER')  # Your email username
-app.config['MAIL_PASSWORD'] = os.getenv('EMAIL_PASS')  # Your email password
-app.config['MAIL_DEFAULT_SENDER'] = os.getenv('EMAIL_USER')  # Default sender email address
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USERNAME'] = os.getenv('EMAIL_USER')
+app.config['MAIL_PASSWORD'] = os.getenv('EMAIL_PASS')
+app.config['MAIL_DEFAULT_SENDER'] = os.getenv('EMAIL_USER')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL').replace("postgres://", "postgresql://", 1)
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Initialize Flask-Mail
+# Initialize extensions
+db = SQLAlchemy(app)
 mail = Mail(app)
 
 # Set OpenAI API key
 openai.api_key = os.getenv("OPENAI_API_KEY")
+
+# Database model for chat logs
+class ChatLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_message = db.Column(db.String(), nullable=False)
+    assistant_response = db.Column(db.String(), nullable=False)
+    timestamp = db.Column(db.DateTime, default=db.func.current_timestamp())
+
+# Create tables
+with app.app_context():
+    db.create_all()
 
 def send_email(subject, recipient, body):
     msg = Message(subject, recipients=[recipient], body=body)
     mail.send(msg)
 
 transcript = []  # Initialize an empty list to hold the discussion transcript
+
+# Function to log messages to database
+def log_message(user_input, assistant_response):
+    new_log = ChatLog(user_message=user_input, assistant_response=assistant_response)
+    db.session.add(new_log)
+    db.session.commit()
 
 # Route to serve the index page
 @app.route('/')
@@ -133,6 +153,8 @@ def ask_openai():
         print('Run Status: ' + run.status)
 
         msgs = openai.beta.threads.messages.list(thread_id)
+        assistant_message = msgs.data[0].content[0].text.value
+        log_message(user_input, assistant_message)
         # Assuming you are appending the assistant's response to the transcript here
         transcript.append(f"Assistant: {msgs.data[0].content[0].text.value}")
 
